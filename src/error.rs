@@ -6,7 +6,7 @@ pub enum Error {
     // indicates a Telegram error (e.g. a property is missing)
     Telegram(String),
     // indicates some failure in CURL, missing network connection etc.
-    TokioCurl,
+    Hyper,
     // indicates a malformated reply, this should never happen unless the Telegram server has a
     // hard time
     JSON,

@@ -10,16 +10,21 @@ use std::time::Duration;
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::cell::{RefCell, Cell};
-use std::sync::{Arc, Mutex};
 
-use curl::easy::{Easy, List,Form,InfoType};
-use tokio_curl::Session;
 use tokio_core::reactor::{Handle, Core, Interval};
 use serde_json;
 use serde_json::value::Value;
 use futures::{Future, IntoFuture, Stream, stream};
 use futures::sync::mpsc;
 use futures::sync::mpsc::UnboundedSender;
+use hyper::client::Request;
+
+use multipart::client::{Multipart};
+use multipart::mock::{ClientRequest,HttpBuffer};
+use mime::{Mime,TopLevel,SubLevel,Attr,Value as MimeValue};
+use hyper::{self,Method,Url};
+use hyper::header::{ContentType,ContentLength};
+use hyper_tls;
 
 /// A clonable, single threaded bot
 ///
@@ -42,7 +47,7 @@ pub struct Bot {
     pub last_id: Cell<u32>,
     pub update_interval: Cell<u64>,
     pub handlers: RefCell<HashMap<String, UnboundedSender<(RcBot, objects::Message)>>>,
-    pub session: Session
+    hyper_client: hyper::Client<hyper_tls::HttpsConnector>
 }
 
 impl Bot {
@@ -53,7 +58,9 @@ impl Bot {
             last_id: Cell::new(0), 
             update_interval: Cell::new(1000), 
             handlers: RefCell::new(HashMap::new()), 
-            session: Session::new(handle.clone()) 
+            hyper_client: hyper::Client::configure()
+                .connector(hyper_tls::HttpsConnector::new(4, &handle))
+                .build(&handle)
         }
     }
 
@@ -63,15 +70,24 @@ impl Bot {
     pub fn fetch_json<'a>(&self, func: &str, msg: &str) -> impl Future<Item=String, Error=Error> + 'a{
         //debug!("Send JSON: {}", msg);
         
-        let mut header = List::new();
-        header.append("Content-Type: application/json").unwrap();
-        
-        let mut a = Easy::new();
-        a.http_headers(header).unwrap();
-        a.post_fields_copy(msg.as_bytes()).unwrap();
-        a.post(true).unwrap();
+        let mut a = Request::new(Method::Post,Url::parse(&format!("https://api.telegram.org/bot{}/{}", self.key, func)).expect("Bad url"));
+        a.headers_mut().set(ContentType(Mime(TopLevel::Application,SubLevel::Json,vec![])));
+        a.set_body(msg.to_string());
 
-        self._fetch(func, a)
+        self._fetch(a)
+    }
+
+    fn build_multipart<T: io::Read>(msg: Value,mut file: T, kind: &str, file_name: &str) -> Result<HttpBuffer,::std::io::Error> {
+          let mut mp = Multipart::from_request(ClientRequest::default())?;
+
+          // add properties
+          for (key, value) in msg.as_object().unwrap().iter() {
+            mp.write_text(key,format!("{:?}",value))?;
+          }
+          // add the file
+          mp.write_stream(kind,&mut file,Some(file_name),None)?;
+          let buffer = mp.send()?;
+          Ok(buffer)
     }
 
     /// Creates a new request with some byte content (e.g. a file). The method properties have to be 
@@ -79,68 +95,39 @@ impl Bot {
     pub fn fetch_formdata<'a, T>(&self, func: &str, msg: Value, mut file: T, kind: &str, file_name: &str) -> impl Future<Item=String, Error=Error> + 'a where T: io::Read {
         let mut content = Vec::new();
 
-        let mut a = Easy::new();
-        let mut form = Form::new();
+        let mut a = Request::new(Method::Post,Url::parse(&format!("https://api.telegram.org/bot{}/{}", self.key, func)).expect("Bad url"));
         
         // try to read the byte content to a vector
         let _ = file.read_to_end(&mut content).unwrap();
 
-        // add properties
-        for (key, val) in msg.as_object().unwrap().iter() {
-            form.part(key).contents(format!("{:?}",val).as_bytes()).add().unwrap();
+        let buffer = Self::build_multipart(msg,file,kind,file_name).expect("File IO failed?");
+
+        a.headers_mut().set(ContentType(Mime(TopLevel::Multipart,SubLevel::FormData,vec![(Attr::Boundary,MimeValue::Ext(buffer.boundary))])));
+        if let Some(len) = buffer.content_len{
+          a.headers_mut().set(ContentLength(len));
         }
-        
-        // add the file
-        form.part(kind).buffer(file_name, content).content_type("application/octet-stream").add().unwrap();
 
         // create a http post request
-        a.post(true).unwrap();
-        a.httppost(form).unwrap();
+        a.set_body(buffer.buf);
 
-        self._fetch(func, a)
+        self._fetch(a)
     }
 
-    /// calls cURL and parses the result for an error
-    pub fn _fetch<'a>(&self, func: &str, mut a: Easy) -> impl Future<Item=String, Error=Error> + 'a {
-        let result = Arc::new(Mutex::new(Vec::new()));
-
-        a.url(&format!("https://api.telegram.org/bot{}/{}", self.key, func)).unwrap();
+    /// calls hyper and parses the result for an error
+    pub fn _fetch<'a>(&self, a: Request) -> impl Future<Item=String, Error=Error> + 'a {
         
-        let r2 = result.clone();
-        a.write_function(move |data| {
-            r2.lock().unwrap().extend_from_slice(data);
-            Ok(data.len())
-        }).unwrap();
-
-        // print debug information
-        a.debug_function(|info, data| {
-            match info {
-                InfoType::DataOut => {
-                    println!("DataOut");
-                },
-                InfoType::Text => {
-                    println!("Text");
-                },
-                InfoType::HeaderOut => {
-                    println!("HeaderOut");
-                },
-                InfoType::SslDataOut => {
-                    println!("SslDataOut");
-                }
-                _ => println!("something else")
-            }
-
-            println!("{:?}", String::from_utf8_lossy(data));
-        }).unwrap();
-        //a.verbose(true).unwrap();
-        //a.show_header(true).unwrap();
-
-        self.session.perform(a)
-        .map_err(|_| Error::TokioCurl)
-        .map(move |_| {
-            let response = result.lock().unwrap();
-            String::from(str::from_utf8(&response).unwrap())
-        }).and_then(|x| {
+        self.hyper_client.request(a)
+        .and_then(|res|{
+            res.body().fold(vec![],|mut buf,chunk|{
+                buf.extend_from_slice(&*chunk);
+                Result::Ok::<_,hyper::Error>(buf)
+            })
+        })
+        .map_err(|_| Error::Hyper)
+        .and_then(|body|{
+            Ok(String::from_utf8_lossy(&*body).into_owned())
+        })
+        .and_then(|x| {
             // try to parse the result as a JSON and find the OK field.
             // If the ok field is true, then the string in "result" will be returned
             if let Ok(req) = serde_json::from_str::<Value>(&x) {

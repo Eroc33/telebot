@@ -61,10 +61,12 @@ extern crate telebot_derive;
 extern crate serde_derive;
 
 extern crate serde_json;
-extern crate curl;
 extern crate futures;
 extern crate tokio_core;
-extern crate tokio_curl;
+extern crate hyper;
+extern crate hyper_tls;
+extern crate mime;
+extern crate multipart;
 
 pub use bot::RcBot;
 pub use error::Error;

@@ -16,8 +16,14 @@ keywords = ["telebot", "telegram", "bot", "chat"]
 serde = "0.8"
 serde_json = "0.8.4"
 serde_derive = "0.8"
-curl = "0.4.1"      
 futures = "0.1.7"     
 tokio-core = "0.1.2"
-tokio-curl = "0.1.6"
+hyper = {git="https://github.com/hyperium/hyper.git"}
+hyper-tls = {git="https://github.com/Eroc33/hyper-tls.git"}
 telebot-derive = "0.0.5"
+mime = "0.2.2"
+
+[dependencies.multipart]
+version = "0.10.0-alpha.1"
+default-features = false
+features = ["client","mock"]
