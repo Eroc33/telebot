@@ -67,7 +67,7 @@ impl Bot {
     /// Creates a new request and adds a JSON message to it. The returned Future contains a the
     /// reply as a string.  This method should be used if no file is added because a JSON msg is
     /// always compacter than a formdata one.
-    pub fn fetch_json<'a>(&self, func: &str, msg: &str) -> impl Future<Item=String, Error=Error> + 'a{
+    pub fn fetch_json(&self, func: &str, msg: &str) -> impl Future<Item=String, Error=Error> {
         //debug!("Send JSON: {}", msg);
         
         let mut a = Request::new(Method::Post,Url::parse(&format!("https://api.telegram.org/bot{}/{}", self.key, func)).expect("Bad url"));
@@ -92,7 +92,7 @@ impl Bot {
 
     /// Creates a new request with some byte content (e.g. a file). The method properties have to be 
     /// in the formdata setup and cannot be sent as JSON.
-    pub fn fetch_formdata<'a, T>(&self, func: &str, msg: Value, mut file: T, kind: &str, file_name: &str) -> impl Future<Item=String, Error=Error> + 'a where T: io::Read {
+    pub fn fetch_formdata<T>(&self, func: &str, msg: Value, mut file: T, kind: &str, file_name: &str) -> impl Future<Item=String, Error=Error>  where T: io::Read {
         let mut content = Vec::new();
 
         let mut a = Request::new(Method::Post,Url::parse(&format!("https://api.telegram.org/bot{}/{}", self.key, func)).expect("Bad url"));
@@ -114,7 +114,7 @@ impl Bot {
     }
 
     /// calls hyper and parses the result for an error
-    pub fn _fetch<'a>(&self, a: Request) -> impl Future<Item=String, Error=Error> + 'a {
+    pub fn _fetch(&self, a: Request) -> impl Future<Item=String, Error=Error> {
         
         self.hyper_client.request(a)
         .and_then(|res|{
