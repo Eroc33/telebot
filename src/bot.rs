@@ -68,7 +68,7 @@ impl Bot {
     /// reply as a string.  This method should be used if no file is added because a JSON msg is
     /// always compacter than a formdata one.
     pub fn fetch_json(&self, func: &str, msg: &str) -> impl Future<Item=String, Error=Error> {
-        //debug!("Send JSON: {}", msg);
+        println!("Send JSON: {}", msg);
         
         let mut a = Request::new(Method::Post,Url::parse(&format!("https://api.telegram.org/bot{}/{}", self.key, func)).expect("Bad url"));
         a.headers_mut().set(ContentType(Mime(TopLevel::Application,SubLevel::Json,vec![])));

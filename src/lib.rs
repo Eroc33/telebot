@@ -60,6 +60,7 @@ extern crate telebot_derive;
 #[macro_use]
 extern crate serde_derive;
 
+extern crate serde;
 extern crate serde_json;
 extern crate futures;
 extern crate tokio_core;
@@ -67,6 +68,8 @@ extern crate hyper;
 extern crate hyper_tls;
 extern crate mime;
 extern crate multipart;
+extern crate erased_serde;
+extern crate uuid;
 
 pub use bot::RcBot;
 pub use error::Error;
